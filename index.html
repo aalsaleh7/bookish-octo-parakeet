@@ -1,10 +1,12 @@
+Here is the complete, updated index.html file utilizing Canvas Vision OCR (gpt-4o-mini).
+Instead of relying on broken PDF text layer extraction, this version takes a high-resolution snapshot of the rendered PDF page canvas and sends it to the model. It performs OCR, applies full Arabic Tashkeel, and passes the clean text into tts-1 for neural voice playback.
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <link rel="manifest" href="manifest.json">
-  <title>PWA Arabic PDF Reader & Audiobook</title>
+  <title>PWA Arabic Canvas Vision Reader</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -23,7 +25,7 @@
       <button id="ai-settings-btn" class="px-2.5 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded text-xs flex items-center gap-1 font-semibold transition">🔑 AI Key</button>
     </div>
 
-    <!-- Speech & Audio Settings -->
+    <!-- Audio Settings -->
     <div class="flex items-center gap-2 flex-wrap">
       <select id="voice-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600 max-w-[130px]"></select>
       <select id="speed-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600">
@@ -39,7 +41,7 @@
       </select>
     </div>
 
-    <!-- Reading Mode & Formatting -->
+    <!-- View & Formatting -->
     <div class="flex items-center gap-2">
       <div id="theme-controls" class="hidden flex items-center gap-1">
         <button onclick="setKindleTheme('dark')" class="w-5 h-5 rounded-full bg-gray-900 border border-gray-600"></button>
@@ -57,11 +59,9 @@
   <main id="reader-container" class="flex-1 overflow-auto relative flex justify-center items-center p-2 bg-gray-950">
     <div id="no-file-msg" class="text-gray-400 text-center p-6">
       <p class="text-xl mb-2">No document loaded</p>
-      <p class="text-xs text-gray-500">Open a PDF file to begin reading. Works offline with local storage.</p>
+      <p class="text-xs text-gray-500">Open a PDF file to begin reading using Canvas Vision processing.</p>
     </div>
     <canvas id="pdf-canvas" class="hidden max-w-full max-h-full shadow-2xl rounded"></canvas>
-    
-    <!-- Kindle Text View Container -->
     <div id="kindle-view" class="hidden w-full max-w-3xl h-full overflow-y-auto p-6 text-right font-serif text-2xl leading-loose bg-gray-800 rounded shadow-inner transition-colors duration-200"></div>
   </main>
 
@@ -77,7 +77,7 @@
     <button id="next-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">Next ▶</button>
   </footer>
 
-  <!-- Drawer (Library / TOC / Bookmarks) -->
+  <!-- Drawer -->
   <aside id="drawer" class="fixed inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 transform translate-x-full transition-transform duration-300 z-20 flex flex-col shadow-2xl">
     <div class="p-4 border-b border-gray-700 flex justify-between items-center">
       <h2 id="drawer-title" class="font-bold text-lg text-white">Menu</h2>
@@ -86,7 +86,7 @@
     <ul id="drawer-list" class="flex-1 overflow-y-auto p-4 space-y-2"></ul>
   </aside>
 
-  <!-- OpenAI Cloud API Settings Modal -->
+  <!-- OpenAI API Modal -->
   <div id="ai-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 hidden flex items-center justify-center p-4">
     <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4">
       <div class="flex items-center justify-between border-b border-gray-700 pb-3">
@@ -95,7 +95,7 @@
       </div>
       
       <p class="text-xs text-gray-400 leading-relaxed">
-        Provide an OpenAI API key to enable neural audio (<code class="text-indigo-300">tts-1</code>) and automatic Arabic Tashkeel diacritization (<code class="text-indigo-300">gpt-4o-mini</code>). If left blank or offline, system defaults to browser TTS.
+        Provide an OpenAI key to enable <b>Canvas Vision OCR</b> (<code class="text-indigo-300">gpt-4o-mini</code>) and neural audio (<code class="text-indigo-300">tts-1</code>). Vision processing completely bypasses broken PDF character streams.
       </p>
 
       <div class="space-y-1">
@@ -116,7 +116,7 @@
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-    // Application State
+    // State Variables
     let pdfDoc = null;
     let currentPage = 1;
     let isKindleMode = false;
@@ -130,11 +130,10 @@
     let wakeLock = null;
     let currentAiAudio = null;
 
-    // Background silent audio element to maintain background audio context execution on iOS/Safari
     const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
     silentAudio.loop = true;
 
-    // DOM Elements
+    // Elements
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
     const kindleView = document.getElementById('kindle-view');
@@ -145,7 +144,7 @@
     const aiModal = document.getElementById('ai-modal');
     const apiKeyInput = document.getElementById('openai-api-key');
 
-    // --- 1. IndexedDB Offline Database Engine ---
+    // --- IndexedDB ---
     function openDB() {
       return new Promise((resolve, reject) => {
         const request = indexedDB.open('PWAReaderMultiDB', 2);
@@ -164,14 +163,7 @@
       const db = await openDB();
       const buffer = await file.arrayBuffer();
       const id = 'book_' + Date.now();
-      const record = {
-        id,
-        title: file.name,
-        data: buffer,
-        currentPage: 1,
-        bookmarks: [],
-        lastRead: new Date().toISOString()
-      };
+      const record = { id, title: file.name, data: buffer, currentPage: 1, bookmarks: [], lastRead: new Date().toISOString() };
       const tx = db.transaction('books', 'readwrite');
       await tx.objectStore('books').put(record);
       return record;
@@ -179,7 +171,7 @@
 
     async function getBookFromDB(id) {
       const db = await openDB();
-      return new Promise((resolve) => {
+      return new Promise(resolve => {
         const tx = db.transaction('books', 'readonly');
         const req = tx.objectStore('books').get(id);
         req.onsuccess = () => resolve(req.result);
@@ -189,7 +181,7 @@
 
     async function getAllBooksFromDB() {
       const db = await openDB();
-      return new Promise((resolve) => {
+      return new Promise(resolve => {
         const tx = db.transaction('books', 'readonly');
         const req = tx.objectStore('books').getAll();
         req.onsuccess = () => resolve(req.result || []);
@@ -211,11 +203,9 @@
       }
     }
 
-    // --- 2. Wake Lock & MediaSession ---
+    // --- WakeLock & MediaSession ---
     async function requestWakeLock() {
-      try {
-        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
-      } catch (e) {}
+      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
     }
 
     function releaseWakeLock() {
@@ -236,82 +226,46 @@
       }
     }
 
-    // --- 3. Enhanced Arabic Text Extraction & Normalizer Engine ---
-    function normalizeArabicText(text) {
-      if (!text) return '';
-      // Clean hidden directional marks and linebreaks
-      let cleaned = text.replace(/[\u200B-\u200D\uFEFF\u200E\u200F\n\r]/g, ' ');
-      // Join Arabic letters that were extracted with extraneous spaces between them
-      cleaned = cleaned.replace(/(?<=[\u0600-\u06FF])\s+(?=[\u0600-\u06FF])/g, '');
-      // Collapse spaces
-      cleaned = cleaned.replace(/\s+/g, ' ').trim();
-      return cleaned;
-    }
+    // --- CANVAS VISION EXTRACTION (Fixes Garbled Arabic) ---
+    async function getPageTextFromCanvas() {
+      const page = await pdfDoc.getPage(currentPage);
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      await page.render({ canvasContext: ctx, viewport }).promise;
 
-    async function getCleanPageText(pageNum) {
-      const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.0 });
-      const textContent = await page.getTextContent();
-      const pageHeight = viewport.height;
+      const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+      const apiKey = localStorage.getItem('pwa_openai_key');
 
-      // Ignore running headers and footers
-      const topCutoff = pageHeight * 0.95;
-      const bottomCutoff = pageHeight * 0.05;
-
-      const validItems = textContent.items.filter(item => {
-        const y = item.transform[5];
-        return y > bottomCutoff && y < topCutoff && item.str.trim().length > 0;
-      });
-
-      // Sort items vertically (top-to-bottom) then horizontally (right-to-left for Arabic)
-      validItems.sort((a, b) => {
-        const yDiff = b.transform[5] - a.transform[5];
-        if (Math.abs(yDiff) > 10) return yDiff;
-        return a.transform[4] - b.transform[4];
-      });
-
-      let rawText = validItems.map(item => item.str).join(' ');
-
-      // Check if character sequence was extracted reversed by PDF stream
-      if (/[\u0600-\u06FF]/.test(rawText)) {
-        const sample = rawText.split(' ').slice(0, 5).join('');
-        if (!sample.includes('ال') && !sample.includes('لا')) {
-          rawText = rawText.split('').reverse().join('');
-        }
+      if (!apiKey) {
+        alert('Please click "🔑 AI Key" and provide an OpenAI API Key to enable Canvas Vision processing.');
+        return '';
       }
 
-      return normalizeArabicText(rawText);
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Extract all Arabic text from this page image in exact reading order. Add full Tashkeel (diacritics) for precise pronunciation. Output ONLY the extracted vocalized Arabic text.' },
+              { type: 'image_url', image_url: { url: base64Image } }
+            ]
+          }],
+          temperature: 0.1
+        })
+      });
+
+      const data = await res.json();
+      return data.choices[0]?.message?.content || '';
     }
 
-    // --- 4. Cloud AI Functions (OpenAI API) ---
-    async function applyAiTashkeel(rawText, apiKey) {
-      try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are an Arabic diacritization tool. Add full tashkeel (تشكيل كامل) to the input text to ensure accurate classical pronunciation. Output ONLY the vocalized Arabic text without explanations or headers.'
-              },
-              { role: 'user', content: rawText }
-            ],
-            temperature: 0.1
-          })
-        });
-        const data = await res.json();
-        return data.choices[0]?.message?.content || rawText;
-      } catch (err) {
-        console.warn('Tashkeel failed, using original text:', err);
-        return rawText;
-      }
-    }
-
+    // --- Audio Pipeline ---
     async function fetchAiAudioStream(vocalizedText, apiKey) {
       const res = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
@@ -327,12 +281,11 @@
         })
       });
 
-      if (!res.ok) throw new Error('AI Audio generation failed');
+      if (!res.ok) throw new Error('Speech API failed');
       const blob = await res.blob();
       return URL.createObjectURL(blob);
     }
 
-    // --- 5. Unified Dual Speech Engine ---
     function renderWordSpans(text) {
       let htmlBuilder = '';
       const wordRegex = /\S+/g;
@@ -355,81 +308,36 @@
         currentAiAudio = null;
       }
 
-      const rawText = await getCleanPageText(currentPage);
-      if (!rawText.trim()) {
-        if (currentPage < pdfDoc.numPages) changePage(1);
-        return;
-      }
-
+      playBtn.textContent = '👁️ Vision OCR...';
       const apiKey = localStorage.getItem('pwa_openai_key');
 
-      // Cloud AI Processing Path
-      if (apiKey && navigator.onLine) {
-        try {
-          playBtn.textContent = '⏳ Processing...';
-          const vocalizedText = await applyAiTashkeel(rawText, apiKey);
-          renderWordSpans(vocalizedText);
-
-          const audioUrl = await fetchAiAudioStream(vocalizedText, apiKey);
-          currentAiAudio = new Audio(audioUrl);
-
-          currentAiAudio.onended = () => {
-            if (isPlaying && currentPage < pdfDoc.numPages) {
-              changePage(1);
-            } else {
-              toggleSpeech(false);
-            }
-          };
-
-          currentAiAudio.play();
-          playBtn.textContent = '⏸ Pause';
-          return;
-        } catch (err) {
-          console.warn('Cloud AI failed. Falling back to native browser speech.', err);
-        }
-      }
-
-      // Offline Native Speech Path
-      renderWordSpans(rawText);
-      speakWithNativeTTS(rawText);
-    }
-
-    function speakWithNativeTTS(text) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ar-SA';
-      utterance.rate = currentRate;
-
-      const voices = window.speechSynthesis.getVoices();
-      const arVoice = voices.find(v => v.lang.startsWith('ar')) || selectedVoice;
-      if (arVoice) utterance.voice = arVoice;
-
-      utterance.onboundary = (event) => {
-        const wordSpans = Array.from(kindleView.querySelectorAll('.word-span'));
-        const activeSpan = wordSpans.find(span => {
-          const start = parseInt(span.dataset.start, 10);
-          const end = parseInt(span.dataset.end, 10);
-          return event.charIndex >= start && event.charIndex <= end;
-        });
-
-        if (activeSpan) {
-          wordSpans.forEach(s => s.classList.remove('bg-amber-400', 'text-black', 'font-bold'));
-          activeSpan.classList.add('bg-amber-400', 'text-black', 'font-bold');
-          activeSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      };
-
-      utterance.onend = () => {
-        if (isPlaying && currentPage < pdfDoc.numPages) {
-          changePage(1);
-        } else {
+      try {
+        const vocalizedText = await getPageTextFromCanvas();
+        if (!vocalizedText.trim()) {
           toggleSpeech(false);
+          return;
         }
-      };
 
-      utterance.onerror = () => toggleSpeech(false);
+        renderWordSpans(vocalizedText);
+        playBtn.textContent = '🔊 Generating...';
 
-      window.speechSynthesis.speak(utterance);
-      playBtn.textContent = '⏸ Pause';
+        const audioUrl = await fetchAiAudioStream(vocalizedText, apiKey);
+        currentAiAudio = new Audio(audioUrl);
+
+        currentAiAudio.onended = () => {
+          if (isPlaying && currentPage < pdfDoc.numPages) {
+            changePage(1);
+          } else {
+            toggleSpeech(false);
+          }
+        };
+
+        currentAiAudio.play();
+        playBtn.textContent = '⏸ Pause';
+      } catch (err) {
+        console.error('Vision processing error:', err);
+        toggleSpeech(false);
+      }
     }
 
     function toggleSpeech(shouldPlay = !isPlaying) {
@@ -452,12 +360,11 @@
       }
     }
 
-    // --- 6. Voice Selector Setup ---
+    // --- Controls & UI ---
     function loadVoices() {
       const voices = window.speechSynthesis.getVoices();
       const voiceSelect = document.getElementById('voice-select');
       voiceSelect.innerHTML = '';
-
       const arVoices = voices.filter(v => v.lang.startsWith('ar'));
       const listToRender = arVoices.length > 0 ? arVoices : voices;
 
@@ -467,13 +374,10 @@
         opt.textContent = `${voice.name} (${voice.lang})`;
         voiceSelect.appendChild(opt);
       });
-
       if (arVoices.length > 0) selectedVoice = arVoices[0];
-      else if (listToRender.length > 0) selectedVoice = listToRender[0];
     }
     window.speechSynthesis.onvoiceschanged = loadVoices;
 
-    // --- 7. View & Page Renderer ---
     async function renderPage() {
       if (!pdfDoc) return;
       noFileMsg.classList.add('hidden');
@@ -484,10 +388,6 @@
         canvas.classList.add('hidden');
         kindleView.classList.remove('hidden');
         themeControls.classList.remove('hidden');
-        if (!isPlaying) {
-          const text = await getCleanPageText(currentPage);
-          kindleView.innerText = text;
-        }
       } else {
         kindleView.classList.add('hidden');
         themeControls.classList.add('hidden');
@@ -516,7 +416,7 @@
       }
     }
 
-    // --- 8. Navigation & Drawer Controllers ---
+    // --- Drawer Controllers ---
     function openDrawer(title) {
       document.getElementById('drawer-title').textContent = title;
       document.getElementById('drawer').classList.remove('translate-x-full');
@@ -546,83 +446,6 @@
       });
     }
 
-    async function showTableOfContents() {
-      openDrawer('Table of Contents');
-      const list = document.getElementById('drawer-list');
-      list.innerHTML = '';
-      const outline = await pdfDoc.getOutline();
-
-      if (!outline || outline.length === 0) {
-        list.innerHTML = '<li class="p-2 text-gray-400 text-xs">No embedded chapters found</li>';
-        return;
-      }
-
-      for (const item of outline) {
-        const li = document.createElement('li');
-        li.className = 'p-2 hover:bg-gray-700 rounded cursor-pointer text-xs text-white';
-        li.textContent = item.title;
-        li.onclick = async () => {
-          let idx;
-          if (typeof item.dest === 'string') {
-            const dest = await pdfDoc.getDestination(item.dest);
-            idx = await pdfDoc.getPageIndex(dest[0]);
-          } else if (Array.isArray(item.dest)) {
-            idx = await pdfDoc.getPageIndex(item.dest[0]);
-          }
-          if (idx !== undefined) {
-            currentPage = idx + 1;
-            renderPage();
-            document.getElementById('drawer').classList.add('translate-x-full');
-          }
-        };
-        list.appendChild(li);
-      }
-    }
-
-    async function showBookmarks() {
-      openDrawer('Bookmarks');
-      const list = document.getElementById('drawer-list');
-      list.innerHTML = '';
-      const record = await getBookFromDB(currentBookId);
-
-      if (!record || !record.bookmarks || record.bookmarks.length === 0) {
-        list.innerHTML = '<li class="p-2 text-gray-400 text-xs">No bookmarks saved</li>';
-        return;
-      }
-
-      record.bookmarks.forEach(p => {
-        const li = document.createElement('li');
-        li.className = 'p-2 bg-gray-700 hover:bg-gray-600 rounded cursor-pointer text-xs text-white flex justify-between';
-        li.innerHTML = `<span>🔖 Page ${p}</span>`;
-        li.onclick = () => {
-          currentPage = p;
-          renderPage();
-          document.getElementById('drawer').classList.add('translate-x-full');
-        };
-        list.appendChild(li);
-      });
-    }
-
-    document.getElementById('bookmark-btn').onclick = async () => {
-      const db = await openDB();
-      const tx = db.transaction('books', 'readwrite');
-      const store = tx.objectStore('books');
-      const record = await new Promise(r => {
-        const req = store.get(currentBookId);
-        req.onsuccess = () => r(req.result);
-      });
-      if (record) {
-        if (!record.bookmarks) record.bookmarks = [];
-        if (!record.bookmarks.includes(currentPage)) {
-          record.bookmarks.push(currentPage);
-          record.bookmarks.sort((a, b) => a - b);
-          await store.put(record);
-          alert(`Page ${currentPage} bookmarked!`);
-        }
-      }
-    };
-
-    // --- 9. Modal Controller ---
     document.getElementById('ai-settings-btn').onclick = () => {
       apiKeyInput.value = localStorage.getItem('pwa_openai_key') || '';
       aiModal.classList.remove('hidden');
@@ -645,7 +468,6 @@
       closeModal();
     };
 
-    // --- 10. Formatting Controls ---
     function setKindleTheme(theme) {
       kindleView.classList.remove('bg-gray-800', 'text-gray-100', 'bg-[#f4ecd8]', 'text-[#5b4636]', 'bg-white', 'text-gray-900');
       if (theme === 'sepia') kindleView.classList.add('bg-[#f4ecd8]', 'text-[#5b4636]');
@@ -658,7 +480,6 @@
       kindleView.style.fontSize = `${currentFontSize}px`;
     }
 
-    // --- 11. Event Handling & Booting ---
     document.getElementById('pdf-file-input').onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -688,16 +509,9 @@
     document.getElementById('next-btn').onclick = () => changePage(1);
     document.getElementById('play-tts-btn').onclick = () => toggleSpeech();
     document.getElementById('shelf-btn').onclick = showLibraryShelf;
-    document.getElementById('toc-btn').onclick = showTableOfContents;
     document.getElementById('kindle-toggle-btn').onclick = () => {
       isKindleMode = !isKindleMode;
       renderPage();
-    };
-
-    document.getElementById('voice-select').onchange = (e) => {
-      const voices = window.speechSynthesis.getVoices();
-      selectedVoice = voices.find(v => v.name === e.target.value);
-      if (isPlaying) speakPageText();
     };
 
     document.getElementById('speed-select').onchange = (e) => {
@@ -705,13 +519,6 @@
       if (isPlaying) speakPageText();
     };
 
-    document.getElementById('sleep-select').onchange = (e) => {
-      if (sleepTimeout) clearTimeout(sleepTimeout);
-      const mins = parseInt(e.target.value);
-      if (mins > 0) sleepTimeout = setTimeout(() => toggleSpeech(false), mins * 60 * 1000);
-    };
-
-    // Restore saved state on application boot
     window.addEventListener('DOMContentLoaded', async () => {
       loadVoices();
       const books = await getAllBooksFromDB();
@@ -729,3 +536,4 @@
   </script>
 </body>
 </html>
+

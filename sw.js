@@ -1,33 +1,24 @@
-const CACHE_NAME = 'pdf-reader-cache-v10';
+// Change 'v1' or 'v9' to 'v10' to force browsers to update the cache
+const CACHE_NAME = 'pwa-arabic-reader-v10';
 
-const ASSETS_TO_CACHE = [
+const ASSETS = [
   './',
   './index.html',
-  './manifest.json',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  './manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Caching app assets');
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
+    caches.keys().then((keys) => {
       return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            console.log('[SW] Clearing old cache:', cache);
-            return caches.delete(cache);
-          }
-        })
+        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
     })
   );
@@ -36,22 +27,6 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || event.request.method !== 'GET') {
-          return response;
-        }
-
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-
-        return response;
-      });
-    })
+    fetch(event.request).catch(() => caches.match(event.request))
   );
 });
