@@ -9,18 +9,16 @@
 </head>
 <body class="bg-gray-950 text-gray-100 h-screen flex flex-col justify-between select-none font-sans">
 
-  <!-- Header / Upload & Language -->
+  <!-- Header -->
   <header class="p-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between gap-2 flex-wrap">
     <div class="flex items-center gap-3">
       <h1 class="text-base font-bold text-emerald-400 flex items-center gap-1">🎧 Web Audible</h1>
       
-      <!-- Language Picker -->
       <select id="lang-select" class="bg-gray-800 text-xs border border-gray-700 rounded px-2.5 py-1.5 text-gray-200 font-semibold focus:outline-none focus:border-emerald-500">
         <option value="ar" selected>🇸🇦 العربية (Arabic)</option>
         <option value="en">🇺🇸 English</option>
         <option value="es">🇪🇸 Español</option>
         <option value="fr">🇫🇷 Français</option>
-        <option value="de">🇩🇪 Deutsch</option>
       </select>
     </div>
 
@@ -30,18 +28,18 @@
     </label>
   </header>
 
-  <!-- Text Display / Reader -->
+  <!-- Text Display -->
   <main id="reader-container" class="flex-1 overflow-y-auto p-6 max-w-3xl mx-auto w-full leading-loose text-xl font-serif text-right">
     <div id="placeholder" class="h-full flex flex-col items-center justify-center text-gray-500 text-center space-y-2">
-      <p class="text-xl">No book loaded / لا يوجد كتاب محمل</p>
-      <p class="text-xs text-gray-600">Select a PDF or TXT file to begin listening.</p>
+      <p class="text-xl">لا يوجد كتاب محمل</p>
+      <p class="text-xs text-gray-600">حدد ملف PDF أو TXT للبدء في الاستماع.</p>
     </div>
+    <div id="status-msg" class="hidden text-center text-emerald-400 font-sans text-sm my-2"></div>
     <div id="text-content" class="hidden space-y-4"></div>
   </main>
 
-  <!-- Audible Bottom Controls -->
+  <!-- Bottom Controls -->
   <footer class="bg-gray-900 border-t border-gray-800 p-4 flex flex-col gap-3 max-w-3xl mx-auto w-full" dir="ltr">
-    <!-- Progress Bar -->
     <div class="flex items-center gap-3 text-xs text-gray-400 font-mono">
       <span id="current-pos">0%</span>
       <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden">
@@ -50,9 +48,7 @@
       <span id="speed-display">1.0x</span>
     </div>
 
-    <!-- Media Buttons -->
     <div class="flex items-center justify-between px-6">
-      <!-- Speed Selector -->
       <select id="speed-select" class="bg-gray-800 text-xs border border-gray-700 rounded px-2 py-1 text-gray-300">
         <option value="0.75">0.75x</option>
         <option value="1.0" selected>1.0x</option>
@@ -62,19 +58,13 @@
       </select>
 
       <div class="flex items-center gap-6">
-        <!-- Skip Back 15s -->
         <button id="skip-back" class="p-2 text-gray-400 hover:text-white text-xl active:scale-95 transition">↺ 15s</button>
-        
-        <!-- Play / Pause -->
         <button id="play-btn" class="w-14 h-14 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold rounded-full flex items-center justify-center text-2xl shadow-lg active:scale-95 transition">
           ▶
         </button>
-        
-        <!-- Skip Forward 15s -->
         <button id="skip-forward" class="p-2 text-gray-400 hover:text-white text-xl active:scale-95 transition">15s ↻</button>
       </div>
 
-      <!-- Voice Selector -->
       <select id="voice-select" class="bg-gray-800 text-xs border border-gray-700 rounded px-2 py-1 text-gray-300 max-w-[120px] truncate"></select>
     </div>
   </footer>
@@ -92,6 +82,7 @@
     const textContainer = document.getElementById('text-content');
     const readerContainer = document.getElementById('reader-container');
     const placeholder = document.getElementById('placeholder');
+    const statusMsg = document.getElementById('status-msg');
     const playBtn = document.getElementById('play-btn');
     const progressBar = document.getElementById('progress-bar');
     const currentPos = document.getElementById('current-pos');
@@ -100,7 +91,6 @@
     const langSelect = document.getElementById('lang-select');
     const htmlRoot = document.getElementById('html-root');
 
-    // Filter Voices based on selected language code
     function filterVoicesForSelectedLang() {
       const voices = synth.getVoices();
       voiceSelect.innerHTML = '';
@@ -117,11 +107,8 @@
       });
     }
 
-    // Handle Language Mode Switch
     langSelect.onchange = () => {
       const selectedLang = langSelect.value;
-      
-      // Toggle RTL vs LTR alignment dynamically
       if (selectedLang === 'ar') {
         htmlRoot.setAttribute('dir', 'rtl');
         htmlRoot.setAttribute('lang', 'ar');
@@ -133,7 +120,6 @@
         readerContainer.classList.remove('text-right');
         readerContainer.classList.add('text-left');
       }
-
       filterVoicesForSelectedLang();
       if (isPlaying) speakCurrentSentence();
     };
@@ -142,39 +128,58 @@
       speechSynthesis.onvoiceschanged = filterVoicesForSelectedLang;
     }
 
-    // Load File
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
       stopSpeech();
+      statusMsg.textContent = "جاري استخراج النص وتنسيقه...";
+      statusMsg.classList.remove('hidden');
+
       let fullText = "";
 
       if (file.name.endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
-          fullText += content.items.map(item => item.str).join(' ') + ' ';
+          
+          // Reconstruct lines based on vertical Y positions to preserve Arabic word order
+          let lastY = null;
+          let pageText = "";
+          for (let item of content.items) {
+            if (lastY !== null && Math.abs(item.transform[5] - lastY) > 5) {
+              pageText += "\n";
+            }
+            pageText += item.str + " ";
+            lastY = item.transform[5];
+          }
+          fullText += pageText + "\n";
         }
       } else {
         fullText = await file.text();
       }
 
+      statusMsg.classList.add('hidden');
       processText(fullText);
     });
 
-    // Segment text
     function processText(text) {
-      const cleanedText = text.replace(/\s+/g, ' ').trim();
-      sentences = cleanedText.match(/[^.!?؟\n]+[.!?؟\n]+/g) || [cleanedText];
-      currentIndex = 0;
+      // Clean up whitespace while preserving sentence boundaries
+      const cleanedText = text.replace(/[r\t]+/g, ' ').replace(/ +/g, ' ').trim();
+      
+      // Split into logical sentences based on punctuation and linebreaks
+      sentences = cleanedText.split(/(?<=[.!?؟\n])\s+/).filter(s => s.trim().length > 0);
+      if (sentences.length === 0) sentences = [cleanedText];
 
+      currentIndex = 0;
       placeholder.classList.add('hidden');
       textContainer.classList.remove('hidden');
+      
       textContainer.innerHTML = sentences.map((s, idx) => 
-        `<span id="s-${idx}" class="p-1 rounded cursor-pointer hover:bg-gray-800 transition inline-block">${s}</span>`
+        `<span id="s-${idx}" class="p-1 rounded cursor-pointer hover:bg-gray-800 transition inline-block my-0.5">${s}</span>`
       ).join(' ');
 
       sentences.forEach((_, idx) => {
@@ -188,7 +193,6 @@
       updateProgress();
     }
 
-    // Speech Control
     function speakCurrentSentence() {
       synth.cancel();
       if (currentIndex >= sentences.length) {
@@ -202,8 +206,7 @@
       const text = sentences[currentIndex];
       currentUtterance = new SpeechSynthesisUtterance(text);
       
-      // Set language tag according to dropdown
-      currentUtterance.lang = langSelect.value;
+      currentUtterance.lang = langSelect.value === 'ar' ? 'ar-SA' : langSelect.value;
       currentUtterance.rate = parseFloat(speedSelect.value);
 
       const voices = synth.getVoices();
@@ -254,7 +257,6 @@
       playBtn.textContent = '▶';
     }
 
-    // Controls
     playBtn.onclick = () => {
       if (!sentences.length) return;
       if (isPlaying) {
