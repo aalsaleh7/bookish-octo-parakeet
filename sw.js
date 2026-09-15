@@ -1,5 +1,4 @@
-const CACHE_NAME = 'pdf-reader-cache-v5';
-
+const CACHE_NAME = 'pdf-reader-cache-v7';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -9,7 +8,6 @@ const ASSETS_TO_CACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
 
-// Install Event: Cache app shell & PDF.js assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -20,7 +18,6 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate Event: Remove old cache versions
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -37,7 +34,6 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch Event: Serve cached assets offline, fetch missing requests from network
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
@@ -45,12 +41,10 @@ self.addEventListener('fetch', (event) => {
         return cachedResponse;
       }
       return fetch(event.request).then((response) => {
-        // Return response directly if invalid or non-GET
         if (!response || response.status !== 200 || event.request.method !== 'GET') {
           return response;
         }
 
-        // Cache network responses for future offline use
         const responseToCache = response.clone();
         caches.open(CACHE_NAME).then((cache) => {
           cache.put(event.request, responseToCache);

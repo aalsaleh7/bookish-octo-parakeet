@@ -230,8 +230,6 @@
   </div>
 
   <script>
-    const CMAP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
-    
     pdfjsLib.GlobalWorkerOptions.workerSrc = 
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
@@ -256,11 +254,7 @@
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdfCopy = arrayBuffer.slice(0);
-        const pdf = await pdfjsLib.getDocument({
-          data: pdfCopy,
-          cMapUrl: CMAP_URL,
-          cMapPacked: true
-        }).promise;
+        const pdf = await pdfjsLib.getDocument({ data: pdfCopy }).promise;
         
         const book = {
           id: 'book_' + Date.now(),
@@ -343,7 +337,6 @@
     const speechRates = [0.8, 1.0, 1.25, 1.5, 1.8, 2.0];
     let rateIndex = 1;
     let wakeLock = null;
-    let currentPageText = "";
 
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
@@ -360,12 +353,7 @@
       document.getElementById('reader-view').style.display = 'flex';
       document.getElementById('page-count').textContent = currentBook.totalPages;
 
-      pdfDoc = await pdfjsLib.getDocument({
-        data: currentBook.data.slice(0),
-        cMapUrl: CMAP_URL,
-        cMapPacked: true
-      }).promise;
-
+      pdfDoc = await pdfjsLib.getDocument({ data: currentBook.data.slice(0) }).promise;
       pageNum = currentBook.lastPage || 1;
       renderPage(pageNum);
     }
@@ -373,6 +361,7 @@
     function renderPage(num) {
       pageRendering = true;
 
+      // Large file memory cleanup
       if (currentPageObj) {
         currentPageObj.cleanup();
       }
@@ -435,57 +424,32 @@
       }
     }
 
-    // --- Text To Speech (Arabic Clean Decoding) ---
+    // --- Text To Speech (Arabic + English + Speed) ---
     async function readCurrentPageText() {
       if (!('speechSynthesis' in window)) {
         alert('Text-to-Speech is not supported in this browser.');
         return;
       }
 
+      window.speechSynthesis.cancel();
+
       try {
         const page = await pdfDoc.getPage(pageNum);
         const textContent = await page.getTextContent();
-        
-        let rawText = textContent.items.map(item => item.str).join(' ');
-        
-        // Sanitize stray dots/unprintable characters
-        currentPageText = rawText
-          .replace(/[\u200B-\u200D\uFEFF]/g, '') // remove zero-width chars
-          .replace(/(\. ){2,}/g, '')            // remove repeating dot sequences
-          .replace(/\.{2,}/g, '')
-          .trim();
+        const extractedText = textContent.items.map(item => item.str).join(' ').trim();
 
-        if (!currentPageText) {
-          alert('No readable text found on this page (it may be an image PDF).');
+        if (!extractedText) {
+          alert('No readable text found on this page (it may be a scanned image PDF).');
           stopSpeech();
           return;
         }
 
-        speakText(currentPageText);
-      } catch (err) {
-        alert('Speech error: ' + err.message);
-        stopSpeech();
-      }
-    }
-
-    function speakText(text) {
-      window.speechSynthesis.cancel();
-
-      setTimeout(() => {
-        if (!isSpeaking) return;
-
-        const utterance = new SpeechSynthesisUtterance(text);
+        const utterance = new SpeechSynthesisUtterance(extractedText);
         
-        const hasArabic = /[\u0600-\u06FF]/.test(text);
+        // Auto-detect Arabic vs English
+        const hasArabic = /[\u0600-\u06FF]/.test(extractedText);
         utterance.lang = hasArabic ? 'ar-SA' : 'en-US';
         utterance.rate = currentSpeechRate;
-
-        // Force Arabic Siri Voice on iOS if available
-        if (hasArabic) {
-          const voices = window.speechSynthesis.getVoices();
-          const arVoice = voices.find(v => v.lang.startsWith('ar'));
-          if (arVoice) utterance.voice = arVoice;
-        }
 
         utterance.onend = () => {
           if (isSpeaking && pageNum < pdfDoc.numPages) {
@@ -501,7 +465,10 @@
 
         requestWakeLock();
         window.speechSynthesis.speak(utterance);
-      }, 50);
+      } catch (err) {
+        alert('Speech error: ' + err.message);
+        stopSpeech();
+      }
     }
 
     function stopSpeech() {
@@ -530,8 +497,8 @@
       currentSpeechRate = speechRates[rateIndex];
       speedBtn.textContent = currentSpeechRate + 'x';
 
-      if (isSpeaking && currentPageText) {
-        speakText(currentPageText);
+      if (isSpeaking) {
+        readCurrentPageText(); // Restart current page with new speed
       }
     };
 
