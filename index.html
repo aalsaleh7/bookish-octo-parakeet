@@ -3,43 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>PWA PDF Reader & Audiobook</title>
+  <link rel="manifest" href="manifest.json">
+  <title>PWA Arabic PDF Reader & Audiobook</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-gray-100 flex flex-col h-screen overflow-hidden select-none">
 
   <!-- Header Controls -->
-  <header class="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4 z-10">
+  <header class="bg-gray-800 border-b border-gray-700 flex flex-wrap items-center justify-between p-3 z-10 gap-2">
     <div class="flex items-center gap-2">
-      <label class="p-2 bg-emerald-700 hover:bg-emerald-600 rounded cursor-pointer text-sm font-semibold">
+      <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded cursor-pointer text-xs font-semibold">
         📁 Open PDF
         <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
       </label>
-      <button id="toc-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">📚 Chapters</button>
+      <button id="shelf-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">📚 Library</button>
+      <button id="toc-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">📑 Chapters</button>
+      <button id="bookmark-btn" class="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 rounded text-xs">🔖 Bookmark</button>
     </div>
 
+    <!-- Speech & Audio Player Settings -->
+    <div class="flex items-center gap-2 flex-wrap">
+      <select id="voice-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600 max-w-[130px]"></select>
+      <select id="speed-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600">
+        <option value="0.75">0.75x</option>
+        <option value="1.0" selected>1.0x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+      </select>
+      <select id="sleep-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600">
+        <option value="0">Timer: Off</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+      </select>
+    </div>
+
+    <!-- Reading Mode & Formatting -->
     <div class="flex items-center gap-2">
-      <button id="kindle-toggle-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">📖 Kindle Mode</button>
-      <button id="export-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">💾 Export</button>
-      <label class="p-2 bg-gray-700 hover:bg-gray-600 rounded cursor-pointer text-sm">
+      <div id="theme-controls" class="hidden flex items-center gap-1">
+        <button onclick="setKindleTheme('dark')" class="w-5 h-5 rounded-full bg-gray-900 border border-gray-600"></button>
+        <button onclick="setKindleTheme('sepia')" class="w-5 h-5 rounded-full bg-[#f4ecd8] border border-amber-800"></button>
+        <button onclick="setKindleTheme('light')" class="w-5 h-5 rounded-full bg-white border border-gray-300"></button>
+        <button onclick="changeFontSize(2)" class="px-1.5 py-0.5 bg-gray-700 rounded text-xs font-bold">A+</button>
+        <button onclick="changeFontSize(-2)" class="px-1.5 py-0.5 bg-gray-700 rounded text-xs font-bold">A-</button>
+      </div>
+
+      <button id="kindle-toggle-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">📖 Kindle Mode</button>
+      <button id="export-btn" class="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs">💾 Export</button>
+      <label class="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded cursor-pointer text-xs">
         📥 Import
         <input type="file" id="import-input" accept=".json" class="hidden">
       </label>
     </div>
   </header>
 
-  <!-- Reader Viewport -->
+  <!-- Main Viewport -->
   <main id="reader-container" class="flex-1 overflow-auto relative flex justify-center items-center p-2 bg-gray-950">
     <div id="no-file-msg" class="text-gray-400 text-center p-6">
       <p class="text-xl mb-2">No document loaded</p>
-      <p class="text-sm">Click "Open PDF" above to load a book. It will be saved automatically to IndexedDB for offline reading.</p>
+      <p class="text-xs text-gray-500">Open a PDF file to begin reading. Works offline with automatic saving.</p>
     </div>
     <canvas id="pdf-canvas" class="hidden max-w-full max-h-full shadow-2xl rounded"></canvas>
-    <div id="kindle-view" class="hidden w-full max-w-2xl h-full overflow-y-auto p-6 text-right font-serif text-2xl leading-relaxed bg-gray-800 rounded shadow-inner"></div>
+    
+    <!-- Kindle Mode Container with Word Highlighting -->
+    <div id="kindle-view" class="hidden w-full max-w-3xl h-full overflow-y-auto p-6 text-right font-serif text-2xl leading-loose bg-gray-800 rounded shadow-inner transition-colors duration-200"></div>
   </main>
 
-  <!-- Audio & Navigation Footer -->
+  <!-- Bottom Player Bar -->
   <footer class="h-20 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-6 z-10">
     <button id="prev-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">◀ Prev</button>
 
@@ -51,27 +81,33 @@
     <button id="next-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">Next ▶</button>
   </footer>
 
-  <!-- TOC Drawer -->
-  <aside id="toc-drawer" class="fixed inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 transform translate-x-full transition-transform duration-300 z-20 flex flex-col shadow-2xl">
+  <!-- Drawers (Library / TOC / Bookmarks) -->
+  <aside id="drawer" class="fixed inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 transform translate-x-full transition-transform duration-300 z-20 flex flex-col shadow-2xl">
     <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-      <h2 class="font-bold text-lg">Table of Contents</h2>
-      <button id="close-toc-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+      <h2 id="drawer-title" class="font-bold text-lg text-white">Menu</h2>
+      <button id="close-drawer-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
     </div>
-    <ul id="toc-list" class="flex-1 overflow-y-auto p-4 space-y-2"></ul>
+    <ul id="drawer-list" class="flex-1 overflow-y-auto p-4 space-y-2"></ul>
   </aside>
 
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-    // Global State
+    // Application State
     let pdfDoc = null;
     let currentPage = 1;
     let isKindleMode = false;
     let isPlaying = false;
-    let currentBookId = 'current_pwa_pdf';
-    let bookTitle = 'Arabic PDF Document';
+    let currentBookId = 'book_default';
+    let bookTitle = 'Arabic Document';
+    let currentRate = 1.0;
+    let selectedVoice = null;
+    let currentFontSize = 24;
+    let sleepTimeout = null;
+    let wakeLock = null;
+    let wordSpans = [];
 
-    // Silent background WAV audio loop to keep iOS web worker & TTS alive on lock screen
+    // Silent background WAV audio loop to sustain iOS Web Worker & TTS on Lock Screen
     const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
     silentAudio.loop = true;
 
@@ -82,11 +118,12 @@
     const pageNumDisplay = document.getElementById('page-num-display');
     const playBtn = document.getElementById('play-tts-btn');
     const noFileMsg = document.getElementById('no-file-msg');
+    const themeControls = document.getElementById('theme-controls');
 
-    // --- 1. IndexedDB Persistence Layer ---
+    // --- 1. IndexedDB Multi-Book Engine ---
     function openDB() {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open('PWAReaderDB', 1);
+        const request = indexedDB.open('PWAReaderMultiDB', 2);
         request.onupgradeneeded = (e) => {
           const db = e.target.result;
           if (!db.objectStoreNames.contains('books')) {
@@ -101,29 +138,40 @@
     async function saveBookToDB(file) {
       const db = await openDB();
       const buffer = await file.arrayBuffer();
+      const id = 'book_' + Date.now();
       const record = {
-        id: currentBookId,
+        id,
         title: file.name,
         data: buffer,
         currentPage: 1,
+        bookmarks: [],
         lastRead: new Date().toISOString()
       };
       const tx = db.transaction('books', 'readwrite');
-      tx.objectStore('books').put(record);
+      await tx.objectStore('books').put(record);
       return record;
     }
 
-    async function getBookFromDB() {
+    async function getBookFromDB(id) {
       const db = await openDB();
       return new Promise((resolve) => {
         const tx = db.transaction('books', 'readonly');
-        const req = tx.objectStore('books').get(currentBookId);
+        const req = tx.objectStore('books').get(id);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
       });
     }
 
-    async function saveProgress(page) {
+    async function getAllBooksFromDB() {
+      const db = await openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('books', 'readonly');
+        const req = tx.objectStore('books').getAll();
+        req.onsuccess = () => resolve(req.result || []);
+      });
+    }
+
+    async function updateBookProgress(page) {
       const db = await openDB();
       const tx = db.transaction('books', 'readwrite');
       const store = tx.objectStore('books');
@@ -138,15 +186,24 @@
       }
     }
 
-    // --- 2. Lock Screen MediaSession Controls ---
+    // --- 2. Screen Wake Lock ---
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+      } catch (e) {}
+    }
+    function releaseWakeLock() {
+      if (wakeLock) { wakeLock.release(); wakeLock = null; }
+    }
+
+    // --- 3. iOS Lock Screen MediaSession API ---
     function setupMediaSession() {
       if ('mediaSession' in navigator && pdfDoc) {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: bookTitle,
           artist: `Page ${currentPage} of ${pdfDoc.numPages}`,
-          album: 'PWA Audiobook Reader'
+          album: 'Arabic PWA Reader'
         });
-
         navigator.mediaSession.setActionHandler('play', () => toggleSpeech(true));
         navigator.mediaSession.setActionHandler('pause', () => toggleSpeech(false));
         navigator.mediaSession.setActionHandler('previoustrack', () => changePage(-1));
@@ -154,29 +211,51 @@
       }
     }
 
+    // --- 4. Arabic Voice Loading & Speech Engine ---
+    function loadVoices() {
+      const voices = window.speechSynthesis.getVoices();
+      const voiceSelect = document.getElementById('voice-select');
+      voiceSelect.innerHTML = '';
+
+      const arVoices = voices.filter(v => v.lang.startsWith('ar'));
+      const listToRender = arVoices.length > 0 ? arVoices : voices;
+
+      listToRender.forEach(voice => {
+        const opt = document.createElement('option');
+        opt.value = voice.name;
+        opt.textContent = `${voice.name} (${voice.lang})`;
+        voiceSelect.appendChild(opt);
+      });
+
+      if (listToRender.length > 0) selectedVoice = listToRender[0];
+    }
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
     function toggleSpeech(shouldPlay = !isPlaying) {
       if (!pdfDoc) return;
       isPlaying = shouldPlay;
       if (isPlaying) {
         playBtn.textContent = '⏸ Pause';
         silentAudio.play().catch(() => {});
+        requestWakeLock();
         setupMediaSession();
         speakPageText();
       } else {
         playBtn.textContent = '▶ Play';
         window.speechSynthesis.cancel();
         silentAudio.pause();
+        releaseWakeLock();
       }
     }
 
-    // --- 3. Text Extraction with Top/Bottom Margin Stripping ---
+    // --- 5. Clean Arabic Text Extraction ---
     async function getCleanPageText(pageNum) {
       const page = await pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1.0 });
       const textContent = await page.getTextContent();
       const pageHeight = viewport.height;
 
-      // Top 5% and bottom 5% filter boundaries
+      // Filter top 5% and bottom 5% header/footer Y-coordinates
       const topCutoff = pageHeight * 0.95;
       const bottomCutoff = pageHeight * 0.05;
 
@@ -185,7 +264,7 @@
         return y > bottomCutoff && y < topCutoff;
       });
 
-      // Sort Right-to-Left and Top-to-Bottom for Arabic readability
+      // Sort Right-to-Left, Top-to-Bottom
       filteredItems.sort((a, b) => {
         const yDiff = b.transform[5] - a.transform[5];
         if (Math.abs(yDiff) > 8) return yDiff;
@@ -195,6 +274,7 @@
       return filteredItems.map(item => item.str).join(' ');
     }
 
+    // --- 6. Synchronized Word-by-Word Text Highlighting ---
     async function speakPageText() {
       window.speechSynthesis.cancel();
       const text = await getCleanPageText(currentPage);
@@ -204,9 +284,33 @@
         return;
       }
 
+      // Build Kindle View Text Structure with Word Spans for Highlighting
+      const words = text.split(/\s+/).filter(w => w.length > 0);
+      kindleView.innerHTML = words.map((w, i) => `<span id="word-${i}" class="transition-colors duration-150 inline-block px-1 rounded">${w}</span> `).join('');
+      wordSpans = words.map((_, i) => document.getElementById(`word-${i}`));
+
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'ar-SA';
-      utterance.rate = 1.0;
+      utterance.rate = currentRate;
+      if (selectedVoice) utterance.voice = selectedVoice;
+
+      let currentWordIdx = 0;
+
+      // Track Speech Progress & Highlight Active Word in Real Time
+      utterance.onboundary = (event) => {
+        if (event.name === 'word') {
+          wordSpans.forEach(span => {
+            if (span) span.classList.remove('bg-amber-400', 'text-black', 'font-bold');
+          });
+
+          const activeSpan = document.getElementById(`word-${currentWordIdx}`);
+          if (activeSpan) {
+            activeSpan.classList.add('bg-amber-400', 'text-black', 'font-bold');
+            activeSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          currentWordIdx++;
+        }
+      };
 
       utterance.onend = () => {
         if (isPlaying && currentPage < pdfDoc.numPages) {
@@ -219,19 +323,24 @@
       window.speechSynthesis.speak(utterance);
     }
 
-    // --- 4. Reader View Engine ---
+    // --- 7. Reader View Engine ---
     async function renderPage() {
       if (!pdfDoc) return;
       noFileMsg.classList.add('hidden');
       pageNumDisplay.textContent = `Page ${currentPage} / ${pdfDoc.numPages}`;
-      saveProgress(currentPage);
+      updateBookProgress(currentPage);
 
       if (isKindleMode) {
         canvas.classList.add('hidden');
         kindleView.classList.remove('hidden');
-        kindleView.innerText = await getCleanPageText(currentPage);
+        themeControls.classList.remove('hidden');
+        if (!isPlaying) {
+          const text = await getCleanPageText(currentPage);
+          kindleView.innerText = text;
+        }
       } else {
         kindleView.classList.add('hidden');
+        themeControls.classList.add('hidden');
         canvas.classList.remove('hidden');
 
         const page = await pdfDoc.getPage(currentPage);
@@ -257,108 +366,195 @@
       }
     }
 
-    // --- 5. Table of Contents (Outline) ---
-    async function renderTableOfContents() {
+    // --- 8. Drawer Navigation Controllers ---
+    function openDrawer(title) {
+      document.getElementById('drawer-title').textContent = title;
+      document.getElementById('drawer').classList.remove('translate-x-full');
+    }
+    document.getElementById('close-drawer-btn').onclick = () => {
+      document.getElementById('drawer').classList.add('translate-x-full');
+    };
+
+    async function showLibraryShelf() {
+      openDrawer('Library Shelf');
+      const list = document.getElementById('drawer-list');
+      list.innerHTML = '';
+      const books = await getAllBooksFromDB();
+
+      books.forEach(b => {
+        const li = document.createElement('li');
+        li.className = 'p-3 bg-gray-700 hover:bg-gray-600 rounded flex justify-between items-center text-xs';
+        li.innerHTML = `
+          <div>
+            <p class="font-bold text-white text-sm">${b.title}</p>
+            <p class="text-gray-400">Page ${b.currentPage}</p>
+          </div>
+          <button onclick="loadBookById('${b.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded">Open</button>
+        `;
+        list.appendChild(li);
+      });
+    }
+
+    async function showTableOfContents() {
+      openDrawer('Table of Contents');
+      const list = document.getElementById('drawer-list');
+      list.innerHTML = '';
       const outline = await pdfDoc.getOutline();
-      const tocList = document.getElementById('toc-list');
-      tocList.innerHTML = '';
 
       if (!outline || outline.length === 0) {
-        tocList.innerHTML = '<li class="p-2 text-gray-400">No embedded outline found</li>';
+        list.innerHTML = '<li class="p-2 text-gray-400 text-xs">No embedded chapters found</li>';
         return;
       }
 
       for (const item of outline) {
         const li = document.createElement('li');
-        li.className = 'p-2 hover:bg-gray-700 rounded cursor-pointer text-sm';
+        li.className = 'p-2 hover:bg-gray-700 rounded cursor-pointer text-xs text-white';
         li.textContent = item.title;
-
         li.onclick = async () => {
-          let pageIndex;
+          let idx;
           if (typeof item.dest === 'string') {
             const dest = await pdfDoc.getDestination(item.dest);
-            pageIndex = await pdfDoc.getPageIndex(dest[0]);
+            idx = await pdfDoc.getPageIndex(dest[0]);
           } else if (Array.isArray(item.dest)) {
-            pageIndex = await pdfDoc.getPageIndex(item.dest[0]);
+            idx = await pdfDoc.getPageIndex(item.dest[0]);
           }
-
-          if (pageIndex !== undefined) {
-            currentPage = pageIndex + 1;
+          if (idx !== undefined) {
+            currentPage = idx + 1;
             renderPage();
-            document.getElementById('toc-drawer').classList.add('translate-x-full');
+            document.getElementById('drawer').classList.add('translate-x-full');
           }
         };
-        tocList.appendChild(li);
+        list.appendChild(li);
       }
     }
 
-    // --- 6. Progress Backup & Import (JSON) ---
-    document.getElementById('export-btn').onclick = async () => {
-      const progressData = {
-        id: currentBookId,
-        title: bookTitle,
-        currentPage: currentPage,
-        lastRead: new Date().toISOString()
-      };
-      const blob = new Blob([JSON.stringify(progressData, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `pwa_reader_backup_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-    };
+    async function showBookmarks() {
+      openDrawer('Bookmarks');
+      const list = document.getElementById('drawer-list');
+      list.innerHTML = '';
+      const record = await getBookFromDB(currentBookId);
 
-    document.getElementById('import-input').onchange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-        const data = JSON.parse(evt.target.result);
-        if (data.currentPage && pdfDoc && data.currentPage <= pdfDoc.numPages) {
-          currentPage = data.currentPage;
+      if (!record || !record.bookmarks || record.bookmarks.length === 0) {
+        list.innerHTML = '<li class="p-2 text-gray-400 text-xs">No bookmarks saved</li>';
+        return;
+      }
+
+      record.bookmarks.forEach(p => {
+        const li = document.createElement('li');
+        li.className = 'p-2 bg-gray-700 hover:bg-gray-600 rounded cursor-pointer text-xs text-white flex justify-between';
+        li.innerHTML = `<span>🔖 Page ${p}</span>`;
+        li.onclick = () => {
+          currentPage = p;
           renderPage();
+          document.getElementById('drawer').classList.add('translate-x-full');
+        };
+        list.appendChild(li);
+      });
+    }
+
+    document.getElementById('bookmark-btn').onclick = async () => {
+      const db = await openDB();
+      const tx = db.transaction('books', 'readwrite');
+      const store = tx.objectStore('books');
+      const record = await new Promise(r => {
+        const req = store.get(currentBookId);
+        req.onsuccess = () => r(req.result);
+      });
+      if (record) {
+        if (!record.bookmarks) record.bookmarks = [];
+        if (!record.bookmarks.includes(currentPage)) {
+          record.bookmarks.push(currentPage);
+          record.bookmarks.sort((a, b) => a - b);
+          await store.put(record);
+          alert(`Page ${currentPage} bookmarked!`);
         }
-      };
-      reader.readAsText(file);
+      }
     };
 
-    // --- Document Loaders & Listeners ---
+    // --- 9. Formatting & Theme Switchers ---
+    function setKindleTheme(theme) {
+      kindleView.classList.remove('bg-gray-800', 'text-gray-100', 'bg-[#f4ecd8]', 'text-[#5b4636]', 'bg-white', 'text-gray-900');
+      if (theme === 'sepia') kindleView.classList.add('bg-[#f4ecd8]', 'text-[#5b4636]');
+      else if (theme === 'light') kindleView.classList.add('bg-white', 'text-gray-900');
+      else kindleView.classList.add('bg-gray-800', 'text-gray-100');
+    }
+
+    function changeFontSize(delta) {
+      currentFontSize = Math.max(14, Math.min(40, currentFontSize + delta));
+      kindleView.style.fontSize = `${currentFontSize}px`;
+    }
+
+    // --- 10. Event Listeners & Bootstrapping ---
     document.getElementById('pdf-file-input').onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      bookTitle = file.name;
       const record = await saveBookToDB(file);
+      currentBookId = record.id;
+      bookTitle = record.title;
       loadPdfFromBuffer(record.data, 1);
     };
 
-    async function loadPdfFromBuffer(arrayBuffer, startPage = 1) {
-      pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    async function loadBookById(id) {
+      const record = await getBookFromDB(id);
+      if (record) {
+        currentBookId = record.id;
+        bookTitle = record.title;
+        loadPdfFromBuffer(record.data, record.currentPage || 1);
+        document.getElementById('drawer').classList.add('translate-x-full');
+      }
+    }
+
+    async function loadPdfFromBuffer(buffer, startPage = 1) {
+      pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
       currentPage = startPage;
-      renderTableOfContents();
       renderPage();
     }
 
     document.getElementById('prev-btn').onclick = () => changePage(-1);
     document.getElementById('next-btn').onclick = () => changePage(1);
     document.getElementById('play-tts-btn').onclick = () => toggleSpeech();
+    document.getElementById('shelf-btn').onclick = showLibraryShelf;
+    document.getElementById('toc-btn').onclick = showTableOfContents;
     document.getElementById('kindle-toggle-btn').onclick = () => {
       isKindleMode = !isKindleMode;
       renderPage();
     };
-    document.getElementById('toc-btn').onclick = () => {
-      document.getElementById('toc-drawer').classList.remove('translate-x-full');
-    };
-    document.getElementById('close-toc-btn').onclick = () => {
-      document.getElementById('toc-drawer').classList.add('translate-x-full');
+
+    document.getElementById('voice-select').onchange = (e) => {
+      const voices = window.speechSynthesis.getVoices();
+      selectedVoice = voices.find(v => v.name === e.target.value);
+      if (isPlaying) speakPageText();
     };
 
-    // Automatically load saved book state from IndexedDB on startup
+    document.getElementById('speed-select').onchange = (e) => {
+      currentRate = parseFloat(e.target.value);
+      if (isPlaying) speakPageText();
+    };
+
+    document.getElementById('sleep-select').onchange = (e) => {
+      if (sleepTimeout) clearTimeout(sleepTimeout);
+      const mins = parseInt(e.target.value);
+      if (mins > 0) {
+        sleepTimeout = setTimeout(() => toggleSpeech(false), mins * 60 * 1000);
+      }
+    };
+
+    // Auto-load last read book state from IndexedDB
     window.addEventListener('DOMContentLoaded', async () => {
-      const record = await getBookFromDB();
-      if (record && record.data) {
-        bookTitle = record.title || 'Arabic PDF Document';
-        loadPdfFromBuffer(record.data, record.currentPage || 1);
+      loadVoices();
+      const books = await getAllBooksFromDB();
+      if (books.length > 0) {
+        books.sort((a, b) => new Date(b.lastRead) - new Date(a.lastRead));
+        currentBookId = books[0].id;
+        bookTitle = books[0].title;
+        loadPdfFromBuffer(books[0].data, books[0].currentPage || 1);
       }
     });
+
+    // Register PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>

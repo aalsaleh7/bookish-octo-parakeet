@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>PWA PDF Reader & Audiobook</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col h-screen overflow-hidden select-none">
+
+  <!-- Header Controls -->
+  <header class="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4 z-10">
+    <div class="flex items-center gap-2">
+      <label class="p-2 bg-emerald-700 hover:bg-emerald-600 rounded cursor-pointer text-sm font-semibold">
+        📁 Open PDF
+        <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
+      </label>
+      <button id="toc-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">📚 Chapters</button>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <button id="kindle-toggle-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">📖 Kindle Mode</button>
+      <button id="export-btn" class="p-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">💾 Export</button>
+      <label class="p-2 bg-gray-700 hover:bg-gray-600 rounded cursor-pointer text-sm">
+        📥 Import
+        <input type="file" id="import-input" accept=".json" class="hidden">
+      </label>
+    </div>
+  </header>
+
+  <!-- Reader Viewport -->
+  <main id="reader-container" class="flex-1 overflow-auto relative flex justify-center items-center p-2 bg-gray-950">
+    <div id="no-file-msg" class="text-gray-400 text-center p-6">
+      <p class="text-xl mb-2">No document loaded</p>
+      <p class="text-sm">Click "Open PDF" above to load a book. It will be saved automatically to IndexedDB for offline reading.</p>
+    </div>
+    <canvas id="pdf-canvas" class="hidden max-w-full max-h-full shadow-2xl rounded"></canvas>
+    <div id="kindle-view" class="hidden w-full max-w-2xl h-full overflow-y-auto p-6 text-right font-serif text-2xl leading-relaxed bg-gray-800 rounded shadow-inner"></div>
+  </main>
+
+  <!-- Audio & Navigation Footer -->
+  <footer class="h-20 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-6 z-10">
+    <button id="prev-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">◀ Prev</button>
+
+    <div class="flex items-center gap-4">
+      <button id="play-tts-btn" class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 font-bold rounded-full text-white shadow-lg active:scale-95 transition">▶ Play</button>
+      <span id="page-num-display" class="text-sm font-mono text-gray-300">Page 0 / 0</span>
+    </div>
+
+    <button id="next-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">Next ▶</button>
+  </footer>
+
+  <!-- TOC Drawer -->
+  <aside id="toc-drawer" class="fixed inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 transform translate-x-full transition-transform duration-300 z-20 flex flex-col shadow-2xl">
+    <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+      <h2 class="font-bold text-lg">Table of Contents</h2>
+      <button id="close-toc-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+    </div>
+    <ul id="toc-list" class="flex-1 overflow-y-auto p-4 space-y-2"></ul>
+  </aside>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // Global State
+    let pdfDoc = null;
+    let currentPage = 1;
+    let isKindleMode = false;
+    let isPlaying = false;
+    let currentBookId = 'current_pwa_pdf';
+    let bookTitle = 'Arabic PDF Document';
+
+    // Silent background WAV audio loop to keep iOS web worker & TTS alive on lock screen
+    const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+    silentAudio.loop = true;
+
+    // DOM References
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    const kindleView = document.getElementById('kindle-view');
+    const pageNumDisplay = document.getElementById('page-num-display');
+    const playBtn = document.getElementById('play-tts-btn');
+    const noFileMsg = document.getElementById('no-file-msg');
+
+    // --- 1. IndexedDB Persistence Layer ---
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('PWAReaderDB', 1);
+        request.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('books')) {
+            db.createObjectStore('books', { keyPath: 'id' });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function saveBookToDB(file) {
+      const db = await openDB();
+      const buffer = await file.arrayBuffer();
+      const record = {
+        id: currentBookId,
+        title: file.name,
+        data: buffer,
+        currentPage: 1,
+        lastRead: new Date().toISOString()
+      };
+      const tx = db.transaction('books', 'readwrite');
+      tx.objectStore('books').put(record);
+      return record;
+    }
+
+    async function getBookFromDB() {
+      const db = await openDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('books', 'readonly');
+        const req = tx.objectStore('books').get(currentBookId);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+    }
+
+    async function saveProgress(page) {
+      const db = await openDB();
+      const tx = db.transaction('books', 'readwrite');
+      const store = tx.objectStore('books');
+      const record = await new Promise(r => {
+        const req = store.get(currentBookId);
+        req.onsuccess = () => r(req.result);
+      });
+      if (record) {
+        record.currentPage = page;
+        record.lastRead = new Date().toISOString();
+        store.put(record);
+      }
+    }
+
+    // --- 2. Lock Screen MediaSession Controls ---
+    function setupMediaSession() {
+      if ('mediaSession' in navigator && pdfDoc) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: bookTitle,
+          artist: `Page ${currentPage} of ${pdfDoc.numPages}`,
+          album: 'PWA Audiobook Reader'
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => toggleSpeech(true));
+        navigator.mediaSession.setActionHandler('pause', () => toggleSpeech(false));
+        navigator.mediaSession.setActionHandler('previoustrack', () => changePage(-1));
+        navigator.mediaSession.setActionHandler('nexttrack', () => changePage(1));
+      }
+    }
+
+    function toggleSpeech(shouldPlay = !isPlaying) {
+      if (!pdfDoc) return;
+      isPlaying = shouldPlay;
+      if (isPlaying) {
+        playBtn.textContent = '⏸ Pause';
+        silentAudio.play().catch(() => {});
+        setupMediaSession();
+        speakPageText();
+      } else {
+        playBtn.textContent = '▶ Play';
+        window.speechSynthesis.cancel();
+        silentAudio.pause();
+      }
+    }
+
+    // --- 3. Text Extraction with Top/Bottom Margin Stripping ---
+    async function getCleanPageText(pageNum) {
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.0 });
+      const textContent = await page.getTextContent();
+      const pageHeight = viewport.height;
+
+      // Top 5% and bottom 5% filter boundaries
+      const topCutoff = pageHeight * 0.95;
+      const bottomCutoff = pageHeight * 0.05;
+
+      const filteredItems = textContent.items.filter(item => {
+        const y = item.transform[5];
+        return y > bottomCutoff && y < topCutoff;
+      });
+
+      // Sort Right-to-Left and Top-to-Bottom for Arabic readability
+      filteredItems.sort((a, b) => {
+        const yDiff = b.transform[5] - a.transform[5];
+        if (Math.abs(yDiff) > 8) return yDiff;
+        return b.transform[4] - a.transform[4];
+      });
+
+      return filteredItems.map(item => item.str).join(' ');
+    }
+
+    async function speakPageText() {
+      window.speechSynthesis.cancel();
+      const text = await getCleanPageText(currentPage);
+
+      if (!text.trim()) {
+        if (currentPage < pdfDoc.numPages) changePage(1);
+        return;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ar-SA';
+      utterance.rate = 1.0;
+
+      utterance.onend = () => {
+        if (isPlaying && currentPage < pdfDoc.numPages) {
+          changePage(1);
+        } else {
+          toggleSpeech(false);
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // --- 4. Reader View Engine ---
+    async function renderPage() {
+      if (!pdfDoc) return;
+      noFileMsg.classList.add('hidden');
+      pageNumDisplay.textContent = `Page ${currentPage} / ${pdfDoc.numPages}`;
+      saveProgress(currentPage);
+
+      if (isKindleMode) {
+        canvas.classList.add('hidden');
+        kindleView.classList.remove('hidden');
+        kindleView.innerText = await getCleanPageText(currentPage);
+      } else {
+        kindleView.classList.add('hidden');
+        canvas.classList.remove('hidden');
+
+        const page = await pdfDoc.getPage(currentPage);
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
+
+      if (isPlaying) {
+        setupMediaSession();
+        speakPageText();
+      }
+    }
+
+    function changePage(delta) {
+      if (!pdfDoc) return;
+      const newPage = currentPage + delta;
+      if (newPage >= 1 && newPage <= pdfDoc.numPages) {
+        currentPage = newPage;
+        renderPage();
+      }
+    }
+
+    // --- 5. Table of Contents (Outline) ---
+    async function renderTableOfContents() {
+      const outline = await pdfDoc.getOutline();
+      const tocList = document.getElementById('toc-list');
+      tocList.innerHTML = '';
+
+      if (!outline || outline.length === 0) {
+        tocList.innerHTML = '<li class="p-2 text-gray-400">No embedded outline found</li>';
+        return;
+      }
+
+      for (const item of outline) {
+        const li = document.createElement('li');
+        li.className = 'p-2 hover:bg-gray-700 rounded cursor-pointer text-sm';
+        li.textContent = item.title;
+
+        li.onclick = async () => {
+          let pageIndex;
+          if (typeof item.dest === 'string') {
+            const dest = await pdfDoc.getDestination(item.dest);
+            pageIndex = await pdfDoc.getPageIndex(dest[0]);
+          } else if (Array.isArray(item.dest)) {
+            pageIndex = await pdfDoc.getPageIndex(item.dest[0]);
+          }
+
+          if (pageIndex !== undefined) {
+            currentPage = pageIndex + 1;
+            renderPage();
+            document.getElementById('toc-drawer').classList.add('translate-x-full');
+          }
+        };
+        tocList.appendChild(li);
+      }
+    }
+
+    // --- 6. Progress Backup & Import (JSON) ---
+    document.getElementById('export-btn').onclick = async () => {
+      const progressData = {
+        id: currentBookId,
+        title: bookTitle,
+        currentPage: currentPage,
+        lastRead: new Date().toISOString()
+      };
+      const blob = new Blob([JSON.stringify(progressData, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pwa_reader_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+    };
+
+    document.getElementById('import-input').onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        const data = JSON.parse(evt.target.result);
+        if (data.currentPage && pdfDoc && data.currentPage <= pdfDoc.numPages) {
+          currentPage = data.currentPage;
+          renderPage();
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    // --- Document Loaders & Listeners ---
+    document.getElementById('pdf-file-input').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      bookTitle = file.name;
+      const record = await saveBookToDB(file);
+      loadPdfFromBuffer(record.data, 1);
+    };
+
+    async function loadPdfFromBuffer(arrayBuffer, startPage = 1) {
+      pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      currentPage = startPage;
+      renderTableOfContents();
+      renderPage();
+    }
+
+    document.getElementById('prev-btn').onclick = () => changePage(-1);
+    document.getElementById('next-btn').onclick = () => changePage(1);
+    document.getElementById('play-tts-btn').onclick = () => toggleSpeech();
+    document.getElementById('kindle-toggle-btn').onclick = () => {
+      isKindleMode = !isKindleMode;
+      renderPage();
+    };
+    document.getElementById('toc-btn').onclick = () => {
+      document.getElementById('toc-drawer').classList.remove('translate-x-full');
+    };
+    document.getElementById('close-toc-btn').onclick = () => {
+      document.getElementById('toc-drawer').classList.add('translate-x-full');
+    };
+
+    // Automatically load saved book state from IndexedDB on startup
+    window.addEventListener('DOMContentLoaded', async () => {
+      const record = await getBookFromDB();
+      if (record && record.data) {
+        bookTitle = record.title || 'Arabic PDF Document';
+        loadPdfFromBuffer(record.data, record.currentPage || 1);
+      }
+    });
+  </script>
+</body>
+</html>
