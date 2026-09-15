@@ -1,539 +1,249 @@
-Here is the complete, updated index.html file utilizing Canvas Vision OCR (gpt-4o-mini).
-Instead of relying on broken PDF text layer extraction, this version takes a high-resolution snapshot of the rendered PDF page canvas and sends it to the model. It performs OCR, applies full Arabic Tashkeel, and passes the clean text into tts-1 for neural voice playback.
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <link rel="manifest" href="manifest.json">
-  <title>PWA Arabic Canvas Vision Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audiobook Reader</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-gray-100 flex flex-col h-screen overflow-hidden select-none">
+<body class="bg-gray-950 text-gray-100 h-screen flex flex-col justify-between select-none font-sans">
 
-  <!-- Header Controls -->
-  <header class="bg-gray-800 border-b border-gray-700 flex flex-wrap items-center justify-between p-3 z-10 gap-2">
-    <div class="flex items-center gap-2">
-      <label class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded cursor-pointer text-xs font-semibold transition">
-        📁 Open PDF
-        <input type="file" id="pdf-file-input" accept="application/pdf" class="hidden">
-      </label>
-      <button id="shelf-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">📚 Library</button>
-      <button id="toc-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">📑 Chapters</button>
-      <button id="bookmark-btn" class="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 rounded text-xs transition">🔖 Bookmark</button>
-      <button id="ai-settings-btn" class="px-2.5 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded text-xs flex items-center gap-1 font-semibold transition">🔑 AI Key</button>
+  <!-- Header / Upload -->
+  <header class="p-4 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+    <h1 class="text-lg font-bold text-emerald-400 flex items-center gap-2">🎧 Web Audible</h1>
+    <label class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-semibold cursor-pointer transition">
+      📁 Open File (PDF / TXT)
+      <input type="file" id="file-input" accept=".pdf,.txt" class="hidden">
+    </label>
+  </header>
+
+  <!-- Text Display / Reader -->
+  <main id="reader-container" class="flex-1 overflow-y-auto p-6 max-w-3xl mx-auto w-full leading-relaxed text-lg font-serif">
+    <div id="placeholder" class="h-full flex flex-col items-center justify-center text-gray-500 text-center space-y-2">
+      <p class="text-xl">No book loaded</p>
+      <p class="text-xs text-gray-600">Select a PDF or TXT file to begin listening.</p>
+    </div>
+    <div id="text-content" class="hidden space-y-4"></div>
+  </main>
+
+  <!-- Audible Bottom Controls -->
+  <footer class="bg-gray-900 border-t border-gray-800 p-4 flex flex-col gap-3 max-w-3xl mx-auto w-full">
+    <!-- Progress Bar -->
+    <div class="flex items-center gap-3 text-xs text-gray-400 font-mono">
+      <span id="current-pos">0%</span>
+      <div class="flex-1 bg-gray-800 h-2 rounded-full overflow-hidden">
+        <div id="progress-bar" class="bg-emerald-500 h-full w-0 transition-all duration-200"></div>
+      </div>
+      <span id="speed-display">1.0x</span>
     </div>
 
-    <!-- Audio Settings -->
-    <div class="flex items-center gap-2 flex-wrap">
-      <select id="voice-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600 max-w-[130px]"></select>
-      <select id="speed-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600">
+    <!-- Media Buttons -->
+    <div class="flex items-center justify-between px-6">
+      <!-- Speed Selector -->
+      <select id="speed-select" class="bg-gray-800 text-xs border border-gray-700 rounded px-2 py-1 text-gray-300">
         <option value="0.75">0.75x</option>
         <option value="1.0" selected>1.0x</option>
         <option value="1.25">1.25x</option>
         <option value="1.5">1.5x</option>
+        <option value="2.0">2.0x</option>
       </select>
-      <select id="sleep-select" class="bg-gray-700 text-xs rounded p-1 border border-gray-600">
-        <option value="0">Timer: Off</option>
-        <option value="15">15 min</option>
-        <option value="30">30 min</option>
-      </select>
-    </div>
 
-    <!-- View & Formatting -->
-    <div class="flex items-center gap-2">
-      <div id="theme-controls" class="hidden flex items-center gap-1">
-        <button onclick="setKindleTheme('dark')" class="w-5 h-5 rounded-full bg-gray-900 border border-gray-600"></button>
-        <button onclick="setKindleTheme('sepia')" class="w-5 h-5 rounded-full bg-[#f4ecd8] border border-amber-800"></button>
-        <button onclick="setKindleTheme('light')" class="w-5 h-5 rounded-full bg-white border border-gray-300"></button>
-        <button onclick="changeFontSize(2)" class="px-1.5 py-0.5 bg-gray-700 rounded text-xs font-bold">A+</button>
-        <button onclick="changeFontSize(-2)" class="px-1.5 py-0.5 bg-gray-700 rounded text-xs font-bold">A-</button>
+      <div class="flex items-center gap-6">
+        <!-- Skip Back 15s -->
+        <button id="skip-back" class="p-2 text-gray-400 hover:text-white text-xl active:scale-95 transition">↺ 15s</button>
+        
+        <!-- Play / Pause -->
+        <button id="play-btn" class="w-14 h-14 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold rounded-full flex items-center justify-center text-2xl shadow-lg active:scale-95 transition">
+          ▶
+        </button>
+        
+        <!-- Skip Forward 15s -->
+        <button id="skip-forward" class="p-2 text-gray-400 hover:text-white text-xl active:scale-95 transition">15s ↻</button>
       </div>
 
-      <button id="kindle-toggle-btn" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">📖 Kindle Mode</button>
+      <!-- Voice Selector -->
+      <select id="voice-select" class="bg-gray-800 text-xs border border-gray-700 rounded px-2 py-1 text-gray-300 max-w-[100px] truncate"></select>
     </div>
-  </header>
-
-  <!-- Main Viewport -->
-  <main id="reader-container" class="flex-1 overflow-auto relative flex justify-center items-center p-2 bg-gray-950">
-    <div id="no-file-msg" class="text-gray-400 text-center p-6">
-      <p class="text-xl mb-2">No document loaded</p>
-      <p class="text-xs text-gray-500">Open a PDF file to begin reading using Canvas Vision processing.</p>
-    </div>
-    <canvas id="pdf-canvas" class="hidden max-w-full max-h-full shadow-2xl rounded"></canvas>
-    <div id="kindle-view" class="hidden w-full max-w-3xl h-full overflow-y-auto p-6 text-right font-serif text-2xl leading-loose bg-gray-800 rounded shadow-inner transition-colors duration-200"></div>
-  </main>
-
-  <!-- Bottom Player Controls -->
-  <footer class="h-20 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-6 z-10">
-    <button id="prev-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">◀ Prev</button>
-
-    <div class="flex items-center gap-4">
-      <button id="play-tts-btn" class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 font-bold rounded-full text-white shadow-lg active:scale-95 transition">▶ Play</button>
-      <span id="page-num-display" class="text-sm font-mono text-gray-300">Page 0 / 0</span>
-    </div>
-
-    <button id="next-btn" class="p-3 bg-gray-700 rounded-full hover:bg-gray-600 active:scale-95 transition">Next ▶</button>
   </footer>
-
-  <!-- Drawer -->
-  <aside id="drawer" class="fixed inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 transform translate-x-full transition-transform duration-300 z-20 flex flex-col shadow-2xl">
-    <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-      <h2 id="drawer-title" class="font-bold text-lg text-white">Menu</h2>
-      <button id="close-drawer-btn" class="text-gray-400 hover:text-white text-2xl">&times;</button>
-    </div>
-    <ul id="drawer-list" class="flex-1 overflow-y-auto p-4 space-y-2"></ul>
-  </aside>
-
-  <!-- OpenAI API Modal -->
-  <div id="ai-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 hidden flex items-center justify-center p-4">
-    <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4">
-      <div class="flex items-center justify-between border-b border-gray-700 pb-3">
-        <h3 class="text-sm font-bold text-white flex items-center gap-2">🔑 OpenAI Cloud Settings</h3>
-        <button id="close-ai-modal" class="text-gray-400 hover:text-white text-xl font-bold leading-none">&times;</button>
-      </div>
-      
-      <p class="text-xs text-gray-400 leading-relaxed">
-        Provide an OpenAI key to enable <b>Canvas Vision OCR</b> (<code class="text-indigo-300">gpt-4o-mini</code>) and neural audio (<code class="text-indigo-300">tts-1</code>). Vision processing completely bypasses broken PDF character streams.
-      </p>
-
-      <div class="space-y-1">
-        <label for="openai-api-key" class="block text-xs font-semibold text-gray-300">API Key</label>
-        <input type="password" id="openai-api-key" placeholder="sk-proj-..." class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono">
-      </div>
-
-      <div class="flex items-center justify-between pt-2">
-        <button id="clear-ai-key-btn" class="px-3 py-1.5 bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-xs rounded transition">Remove Key</button>
-        <div class="flex items-center gap-2">
-          <button id="close-ai-modal-cancel" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-xs rounded text-gray-300">Cancel</button>
-          <button id="save-ai-key-btn" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded shadow transition">Save Key</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-    // State Variables
-    let pdfDoc = null;
-    let currentPage = 1;
-    let isKindleMode = false;
+    let sentences = [];
+    let currentIndex = 0;
     let isPlaying = false;
-    let currentBookId = 'book_default';
-    let bookTitle = 'Arabic Document';
-    let currentRate = 1.0;
-    let selectedVoice = null;
-    let currentFontSize = 24;
-    let sleepTimeout = null;
-    let wakeLock = null;
-    let currentAiAudio = null;
+    let synth = window.speechSynthesis;
+    let currentUtterance = null;
 
-    const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
-    silentAudio.loop = true;
+    const fileInput = document.getElementById('file-input');
+    const textContainer = document.getElementById('text-content');
+    const placeholder = document.getElementById('placeholder');
+    const playBtn = document.getElementById('play-btn');
+    const progressBar = document.getElementById('progress-bar');
+    const currentPos = document.getElementById('current-pos');
+    const speedSelect = document.getElementById('speed-select');
+    const voiceSelect = document.getElementById('voice-select');
 
-    // Elements
-    const canvas = document.getElementById('pdf-canvas');
-    const ctx = canvas.getContext('2d');
-    const kindleView = document.getElementById('kindle-view');
-    const pageNumDisplay = document.getElementById('page-num-display');
-    const playBtn = document.getElementById('play-tts-btn');
-    const noFileMsg = document.getElementById('no-file-msg');
-    const themeControls = document.getElementById('theme-controls');
-    const aiModal = document.getElementById('ai-modal');
-    const apiKeyInput = document.getElementById('openai-api-key');
-
-    // --- IndexedDB ---
-    function openDB() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open('PWAReaderMultiDB', 2);
-        request.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains('books')) {
-            db.createObjectStore('books', { keyPath: 'id' });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-    }
-
-    async function saveBookToDB(file) {
-      const db = await openDB();
-      const buffer = await file.arrayBuffer();
-      const id = 'book_' + Date.now();
-      const record = { id, title: file.name, data: buffer, currentPage: 1, bookmarks: [], lastRead: new Date().toISOString() };
-      const tx = db.transaction('books', 'readwrite');
-      await tx.objectStore('books').put(record);
-      return record;
-    }
-
-    async function getBookFromDB(id) {
-      const db = await openDB();
-      return new Promise(resolve => {
-        const tx = db.transaction('books', 'readonly');
-        const req = tx.objectStore('books').get(id);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(null);
-      });
-    }
-
-    async function getAllBooksFromDB() {
-      const db = await openDB();
-      return new Promise(resolve => {
-        const tx = db.transaction('books', 'readonly');
-        const req = tx.objectStore('books').getAll();
-        req.onsuccess = () => resolve(req.result || []);
-      });
-    }
-
-    async function updateBookProgress(page) {
-      const db = await openDB();
-      const tx = db.transaction('books', 'readwrite');
-      const store = tx.objectStore('books');
-      const record = await new Promise(r => {
-        const req = store.get(currentBookId);
-        req.onsuccess = () => r(req.result);
-      });
-      if (record) {
-        record.currentPage = page;
-        record.lastRead = new Date().toISOString();
-        store.put(record);
-      }
-    }
-
-    // --- WakeLock & MediaSession ---
-    async function requestWakeLock() {
-      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
-    }
-
-    function releaseWakeLock() {
-      if (wakeLock) { wakeLock.release(); wakeLock = null; }
-    }
-
-    function setupMediaSession() {
-      if ('mediaSession' in navigator && pdfDoc) {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: bookTitle,
-          artist: `Page ${currentPage} of ${pdfDoc.numPages}`,
-          album: 'Arabic PWA Reader'
-        });
-        navigator.mediaSession.setActionHandler('play', () => toggleSpeech(true));
-        navigator.mediaSession.setActionHandler('pause', () => toggleSpeech(false));
-        navigator.mediaSession.setActionHandler('previoustrack', () => changePage(-1));
-        navigator.mediaSession.setActionHandler('nexttrack', () => changePage(1));
-      }
-    }
-
-    // --- CANVAS VISION EXTRACTION (Fixes Garbled Arabic) ---
-    async function getPageTextFromCanvas() {
-      const page = await pdfDoc.getPage(currentPage);
-      const viewport = page.getViewport({ scale: 1.5 });
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-      await page.render({ canvasContext: ctx, viewport }).promise;
-
-      const base64Image = canvas.toDataURL('image/jpeg', 0.8);
-      const apiKey = localStorage.getItem('pwa_openai_key');
-
-      if (!apiKey) {
-        alert('Please click "🔑 AI Key" and provide an OpenAI API Key to enable Canvas Vision processing.');
-        return '';
-      }
-
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Extract all Arabic text from this page image in exact reading order. Add full Tashkeel (diacritics) for precise pronunciation. Output ONLY the extracted vocalized Arabic text.' },
-              { type: 'image_url', image_url: { url: base64Image } }
-            ]
-          }],
-          temperature: 0.1
-        })
-      });
-
-      const data = await res.json();
-      return data.choices[0]?.message?.content || '';
-    }
-
-    // --- Audio Pipeline ---
-    async function fetchAiAudioStream(vocalizedText, apiKey) {
-      const res = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'tts-1',
-          input: vocalizedText,
-          voice: 'onyx',
-          speed: currentRate
-        })
-      });
-
-      if (!res.ok) throw new Error('Speech API failed');
-      const blob = await res.blob();
-      return URL.createObjectURL(blob);
-    }
-
-    function renderWordSpans(text) {
-      let htmlBuilder = '';
-      const wordRegex = /\S+/g;
-      let match;
-
-      while ((match = wordRegex.exec(text)) !== null) {
-        const word = match[0];
-        const startIdx = match.index;
-        const endIdx = startIdx + word.length;
-        htmlBuilder += `<span data-start="${startIdx}" data-end="${endIdx}" class="word-span transition-colors duration-150 inline-block px-1 rounded">${word}</span> `;
-      }
-
-      kindleView.innerHTML = htmlBuilder;
-    }
-
-    async function speakPageText() {
-      window.speechSynthesis.cancel();
-      if (currentAiAudio) {
-        currentAiAudio.pause();
-        currentAiAudio = null;
-      }
-
-      playBtn.textContent = '👁️ Vision OCR...';
-      const apiKey = localStorage.getItem('pwa_openai_key');
-
-      try {
-        const vocalizedText = await getPageTextFromCanvas();
-        if (!vocalizedText.trim()) {
-          toggleSpeech(false);
-          return;
-        }
-
-        renderWordSpans(vocalizedText);
-        playBtn.textContent = '🔊 Generating...';
-
-        const audioUrl = await fetchAiAudioStream(vocalizedText, apiKey);
-        currentAiAudio = new Audio(audioUrl);
-
-        currentAiAudio.onended = () => {
-          if (isPlaying && currentPage < pdfDoc.numPages) {
-            changePage(1);
-          } else {
-            toggleSpeech(false);
-          }
-        };
-
-        currentAiAudio.play();
-        playBtn.textContent = '⏸ Pause';
-      } catch (err) {
-        console.error('Vision processing error:', err);
-        toggleSpeech(false);
-      }
-    }
-
-    function toggleSpeech(shouldPlay = !isPlaying) {
-      if (!pdfDoc) return;
-      isPlaying = shouldPlay;
-      if (isPlaying) {
-        silentAudio.play().catch(() => {});
-        requestWakeLock();
-        setupMediaSession();
-        speakPageText();
-      } else {
-        playBtn.textContent = '▶ Play';
-        window.speechSynthesis.cancel();
-        if (currentAiAudio) {
-          currentAiAudio.pause();
-          currentAiAudio = null;
-        }
-        silentAudio.pause();
-        releaseWakeLock();
-      }
-    }
-
-    // --- Controls & UI ---
+    // Populate System Voices
     function loadVoices() {
-      const voices = window.speechSynthesis.getVoices();
-      const voiceSelect = document.getElementById('voice-select');
+      const voices = synth.getVoices();
       voiceSelect.innerHTML = '';
-      const arVoices = voices.filter(v => v.lang.startsWith('ar'));
-      const listToRender = arVoices.length > 0 ? arVoices : voices;
-
-      listToRender.forEach(voice => {
+      voices.forEach((v, i) => {
         const opt = document.createElement('option');
-        opt.value = voice.name;
-        opt.textContent = `${voice.name} (${voice.lang})`;
+        opt.value = i;
+        opt.textContent = `${v.name} (${v.lang})`;
+        if (v.default) opt.selected = true;
         voiceSelect.appendChild(opt);
       });
-      if (arVoices.length > 0) selectedVoice = arVoices[0];
     }
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-
-    async function renderPage() {
-      if (!pdfDoc) return;
-      noFileMsg.classList.add('hidden');
-      pageNumDisplay.textContent = `Page ${currentPage} / ${pdfDoc.numPages}`;
-      updateBookProgress(currentPage);
-
-      if (isKindleMode) {
-        canvas.classList.add('hidden');
-        kindleView.classList.remove('hidden');
-        themeControls.classList.remove('hidden');
-      } else {
-        kindleView.classList.add('hidden');
-        themeControls.classList.add('hidden');
-        canvas.classList.remove('hidden');
-
-        const page = await pdfDoc.getPage(currentPage);
-        const viewport = page.getViewport({ scale: 1.5 });
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      }
-
-      if (isPlaying) {
-        setupMediaSession();
-        speakPageText();
-      }
+    loadVoices();
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+      speechSynthesis.onvoiceschanged = loadVoices;
     }
 
-    function changePage(delta) {
-      if (!pdfDoc) return;
-      const newPage = currentPage + delta;
-      if (newPage >= 1 && newPage <= pdfDoc.numPages) {
-        currentPage = newPage;
-        renderPage();
-      }
-    }
-
-    // --- Drawer Controllers ---
-    function openDrawer(title) {
-      document.getElementById('drawer-title').textContent = title;
-      document.getElementById('drawer').classList.remove('translate-x-full');
-    }
-
-    document.getElementById('close-drawer-btn').onclick = () => {
-      document.getElementById('drawer').classList.add('translate-x-full');
-    };
-
-    async function showLibraryShelf() {
-      openDrawer('Library Shelf');
-      const list = document.getElementById('drawer-list');
-      list.innerHTML = '';
-      const books = await getAllBooksFromDB();
-
-      books.forEach(b => {
-        const li = document.createElement('li');
-        li.className = 'p-3 bg-gray-700 hover:bg-gray-600 rounded flex justify-between items-center text-xs';
-        li.innerHTML = `
-          <div>
-            <p class="font-bold text-white text-sm">${b.title}</p>
-            <p class="text-gray-400">Page ${b.currentPage}</p>
-          </div>
-          <button onclick="loadBookById('${b.id}')" class="px-3 py-1 bg-emerald-600 text-white rounded">Open</button>
-        `;
-        list.appendChild(li);
-      });
-    }
-
-    document.getElementById('ai-settings-btn').onclick = () => {
-      apiKeyInput.value = localStorage.getItem('pwa_openai_key') || '';
-      aiModal.classList.remove('hidden');
-    };
-
-    const closeModal = () => aiModal.classList.add('hidden');
-    document.getElementById('close-ai-modal').onclick = closeModal;
-    document.getElementById('close-ai-modal-cancel').onclick = closeModal;
-
-    document.getElementById('save-ai-key-btn').onclick = () => {
-      const key = apiKeyInput.value.trim();
-      if (key) localStorage.setItem('pwa_openai_key', key);
-      else localStorage.removeItem('pwa_openai_key');
-      closeModal();
-    };
-
-    document.getElementById('clear-ai-key-btn').onclick = () => {
-      localStorage.removeItem('pwa_openai_key');
-      apiKeyInput.value = '';
-      closeModal();
-    };
-
-    function setKindleTheme(theme) {
-      kindleView.classList.remove('bg-gray-800', 'text-gray-100', 'bg-[#f4ecd8]', 'text-[#5b4636]', 'bg-white', 'text-gray-900');
-      if (theme === 'sepia') kindleView.classList.add('bg-[#f4ecd8]', 'text-[#5b4636]');
-      else if (theme === 'light') kindleView.classList.add('bg-white', 'text-gray-900');
-      else kindleView.classList.add('bg-gray-800', 'text-gray-100');
-    }
-
-    function changeFontSize(delta) {
-      currentFontSize = Math.max(14, Math.min(40, currentFontSize + delta));
-      kindleView.style.fontSize = `${currentFontSize}px`;
-    }
-
-    document.getElementById('pdf-file-input').onchange = async (e) => {
+    // Load File Handler
+    fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      const record = await saveBookToDB(file);
-      currentBookId = record.id;
-      bookTitle = record.title;
-      loadPdfFromBuffer(record.data, 1);
-    };
 
-    async function loadBookById(id) {
-      const record = await getBookFromDB(id);
-      if (record) {
-        currentBookId = record.id;
-        bookTitle = record.title;
-        loadPdfFromBuffer(record.data, record.currentPage || 1);
-        document.getElementById('drawer').classList.add('translate-x-full');
+      stopSpeech();
+      let fullText = "";
+
+      if (file.name.endsWith('.pdf')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map(item => item.str).join(' ') + ' ';
+        }
+      } else {
+        fullText = await file.text();
       }
-    }
 
-    async function loadPdfFromBuffer(buffer, startPage = 1) {
-      pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
-      currentPage = startPage;
-      renderPage();
-    }
-
-    document.getElementById('prev-btn').onclick = () => changePage(-1);
-    document.getElementById('next-btn').onclick = () => changePage(1);
-    document.getElementById('play-tts-btn').onclick = () => toggleSpeech();
-    document.getElementById('shelf-btn').onclick = showLibraryShelf;
-    document.getElementById('kindle-toggle-btn').onclick = () => {
-      isKindleMode = !isKindleMode;
-      renderPage();
-    };
-
-    document.getElementById('speed-select').onchange = (e) => {
-      currentRate = parseFloat(e.target.value);
-      if (isPlaying) speakPageText();
-    };
-
-    window.addEventListener('DOMContentLoaded', async () => {
-      loadVoices();
-      const books = await getAllBooksFromDB();
-      if (books.length > 0) {
-        books.sort((a, b) => new Date(b.lastRead) - new Date(a.lastRead));
-        currentBookId = books[0].id;
-        bookTitle = books[0].title;
-        loadPdfFromBuffer(books[0].data, books[0].currentPage || 1);
-      }
+      processText(fullText);
     });
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // Segment text into readable sentences
+    function processText(text) {
+      sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+      currentIndex = 0;
+
+      placeholder.classList.add('hidden');
+      textContainer.classList.remove('hidden');
+      textContainer.innerHTML = sentences.map((s, idx) => 
+        `<span id="s-${idx}" class="p-1 rounded cursor-pointer hover:bg-gray-800 transition">${s}</span>`
+      ).join(' ');
+
+      // Allow clicking any sentence to read from there
+      sentences.forEach((_, idx) => {
+        document.getElementById(`s-${idx}`).onclick = () => {
+          currentIndex = idx;
+          if (isPlaying) speakCurrentSentence();
+          else updateHighlight();
+        };
+      });
+
+      updateProgress();
     }
+
+    // Speech Control Logic
+    function speakCurrentSentence() {
+      synth.cancel();
+      if (currentIndex >= sentences.length) {
+        isPlaying = false;
+        playBtn.textContent = '▶';
+        return;
+      }
+
+      updateHighlight();
+
+      const text = sentences[currentIndex];
+      currentUtterance = new SpeechSynthesisUtterance(text);
+      currentUtterance.rate = parseFloat(speedSelect.value);
+
+      const voices = synth.getVoices();
+      if (voices[voiceSelect.value]) {
+        currentUtterance.voice = voices[voiceSelect.value];
+      }
+
+      currentUtterance.onend = () => {
+        if (isPlaying) {
+          currentIndex++;
+          speakCurrentSentence();
+        }
+      };
+
+      currentUtterance.onerror = () => {
+        if (isPlaying) {
+          currentIndex++;
+          speakCurrentSentence();
+        }
+      };
+
+      synth.speak(currentUtterance);
+    }
+
+    function updateHighlight() {
+      document.querySelectorAll('.bg-emerald-900').forEach(el => {
+        el.classList.remove('bg-emerald-900', 'text-emerald-200');
+      });
+      const el = document.getElementById(`s-${currentIndex}`);
+      if (el) {
+        el.classList.add('bg-emerald-900', 'text-emerald-200');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      updateProgress();
+    }
+
+    function updateProgress() {
+      if (!sentences.length) return;
+      const pct = Math.round((currentIndex / sentences.length) * 100);
+      progressBar.style.width = `${pct}%`;
+      currentPos.textContent = `${pct}%`;
+    }
+
+    function stopSpeech() {
+      isPlaying = false;
+      synth.cancel();
+      playBtn.textContent = '▶';
+    }
+
+    // Playback Event Listeners
+    playBtn.onclick = () => {
+      if (!sentences.length) return;
+      if (isPlaying) {
+        isPlaying = false;
+        synth.pause();
+        playBtn.textContent = '▶';
+      } else {
+        isPlaying = true;
+        playBtn.textContent = '⏸';
+        if (synth.paused) {
+          synth.resume();
+        } else {
+          speakCurrentSentence();
+        }
+      }
+    };
+
+    document.getElementById('skip-forward').onclick = () => {
+      currentIndex = Math.min(sentences.length - 1, currentIndex + 3);
+      if (isPlaying) speakCurrentSentence();
+      else updateHighlight();
+    };
+
+    document.getElementById('skip-back').onclick = () => {
+      currentIndex = Math.max(0, currentIndex - 3);
+      if (isPlaying) speakCurrentSentence();
+      else updateHighlight();
+    };
+
+    speedSelect.onchange = () => {
+      document.getElementById('speed-display').textContent = `${speedSelect.value}x`;
+      if (isPlaying) speakCurrentSentence();
+    };
   </script>
 </body>
 </html>
-
