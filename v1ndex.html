@@ -64,12 +64,12 @@
       background-color: var(--primary);
       color: white;
       border: none;
-      padding: 8px 12px;
+      padding: 10px 14px;
       border-radius: 8px;
       cursor: pointer;
       font-weight: 600;
-      min-height: 40px;
-      font-size: 13px;
+      min-height: 44px;
+      font-size: 14px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -150,11 +150,10 @@
       background: var(--toolbar-bg);
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border-color);
-      padding: max(8px, env(safe-area-inset-top)) 8px 8px 8px;
+      padding: max(8px, env(safe-area-inset-top)) 12px 8px 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 4px;
       z-index: 100;
       transition: transform 0.25s ease;
     }
@@ -216,9 +215,8 @@
   <div id="reader-view">
     <div id="reader-toolbar">
       <button class="btn btn-secondary" id="back-to-lib">← Lib</button>
-      <span style="font-size: 12px;"><span id="page-num">1</span>/<span id="page-count">?</span></span>
+      <span style="font-size: 13px;"><span id="page-num">1</span> / <span id="page-count">?</span></span>
       <button class="btn" id="tts-btn">🔊 Listen</button>
-      <button class="btn btn-secondary" id="speed-btn">1.0x</button>
       <button class="btn btn-secondary" id="fit-width">📱 Fit</button>
     </div>
 
@@ -325,23 +323,15 @@
 
     let currentBook = null;
     let pdfDoc = null;
-    let currentPageObj = null;
     let pageNum = 1;
     let scale = 1.0;
     let pageRendering = false;
     let pageNumPending = null;
-    
-    // TTS State
     let isSpeaking = false;
-    let currentSpeechRate = 1.0;
-    const speechRates = [0.8, 1.0, 1.25, 1.5, 1.8, 2.0];
-    let rateIndex = 1;
-    let wakeLock = null;
 
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
     const ttsBtn = document.getElementById('tts-btn');
-    const speedBtn = document.getElementById('speed-btn');
 
     async function openReader(bookId) {
       const db = await openDB();
@@ -360,14 +350,7 @@
 
     function renderPage(num) {
       pageRendering = true;
-
-      // Large file memory cleanup
-      if (currentPageObj) {
-        currentPageObj.cleanup();
-      }
-
       pdfDoc.getPage(num).then(page => {
-        currentPageObj = page;
         const unscaledViewport = page.getViewport({ scale: 1.0 });
         const screenWidth = window.innerWidth;
         scale = screenWidth / unscaledViewport.width;
@@ -411,20 +394,7 @@
       queueRenderPage(pageNum);
     }
 
-    // --- Wake Lock for Screen ---
-    async function requestWakeLock() {
-      if ('wakeLock' in navigator) {
-        try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
-      }
-    }
-
-    function releaseWakeLock() {
-      if (wakeLock) {
-        wakeLock.release().then(() => wakeLock = null);
-      }
-    }
-
-    // --- Text To Speech (Arabic + English + Speed) ---
+    // --- Text To Speech (Read Aloud) ---
     async function readCurrentPageText() {
       if (!('speechSynthesis' in window)) {
         alert('Text-to-Speech is not supported in this browser.');
@@ -439,17 +409,13 @@
         const extractedText = textContent.items.map(item => item.str).join(' ').trim();
 
         if (!extractedText) {
-          alert('No readable text found on this page (it may be a scanned image PDF).');
+          alert('No read aloud text found on this page (it may be a scanned image).');
           stopSpeech();
           return;
         }
 
         const utterance = new SpeechSynthesisUtterance(extractedText);
-        
-        // Auto-detect Arabic vs English
-        const hasArabic = /[\u0600-\u06FF]/.test(extractedText);
-        utterance.lang = hasArabic ? 'ar-SA' : 'en-US';
-        utterance.rate = currentSpeechRate;
+        utterance.rate = 0.95; // Natural speed
 
         utterance.onend = () => {
           if (isSpeaking && pageNum < pdfDoc.numPages) {
@@ -463,7 +429,6 @@
 
         utterance.onerror = () => stopSpeech();
 
-        requestWakeLock();
         window.speechSynthesis.speak(utterance);
       } catch (err) {
         alert('Speech error: ' + err.message);
@@ -476,7 +441,6 @@
         window.speechSynthesis.cancel();
       }
       isSpeaking = false;
-      releaseWakeLock();
       ttsBtn.textContent = '🔊 Listen';
       ttsBtn.classList.remove('btn-danger');
     }
@@ -489,16 +453,6 @@
         ttsBtn.textContent = '⏸️ Stop';
         ttsBtn.classList.add('btn-danger');
         readCurrentPageText();
-      }
-    };
-
-    speedBtn.onclick = () => {
-      rateIndex = (rateIndex + 1) % speechRates.length;
-      currentSpeechRate = speechRates[rateIndex];
-      speedBtn.textContent = currentSpeechRate + 'x';
-
-      if (isSpeaking) {
-        readCurrentPageText(); // Restart current page with new speed
       }
     };
 
